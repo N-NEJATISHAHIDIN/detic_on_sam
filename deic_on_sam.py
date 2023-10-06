@@ -1,3 +1,7 @@
+import logging
+logging.basicConfig(filename='zeroshot_detic.log', level=logging.DEBUG)
+
+
 import torch
 TORCH_VERSION = ".".join(torch.__version__.split(".")[:2])
 CUDA_VERSION = torch.__version__.split("+")[-1]
@@ -6,7 +10,6 @@ from tqdm import tqdm
 
 
 # !python -m pip install 'git+https://github.com/facebookresearch/detectron2.git@v0.6'
-
 # # clone and install Detic
 # !git clone https://github.com/facebookresearch/Detic.git --recurse-submodules
 # %cd Detic
@@ -85,7 +88,7 @@ reset_cls_test(predictor.model, classifier, num_classes)
 # load sam_data loader
 sys.path.insert(0, '../')
 from dataset import Ai2Thour_re_dataset
-from utils import draw_images#, mask_iou
+from utils import draw_images, synonim_using_birt, synonim_using_fast_text, mask_iou #, mask_iou
 from torch.utils.data import DataLoader
 import csv
 
@@ -121,8 +124,15 @@ bert_model = BertModel.from_pretrained(bert_model_name)
 
 idx = 0
 predicted = 0
-for batch in my_dataloader:
-    idx+=1
+fasttext_acc = 0
+birt_cls_acc = 0
+birt_avg_acc = 0
+
+fasttext_num = 0
+birt_cls_num = 0 
+birt_avg_num = 0 
+
+for batch in tqdm(my_dataloader):
     depth_img = batch[0][0]
     rgb_img = batch[1][0]
     seg_img = batch[2][0]
@@ -132,76 +142,90 @@ for batch in my_dataloader:
     descriptions = batch[-3][0]
     reference_obj_name = batch[-1][0]
 
-    img_org_path = "saved_images/org_image_with_labels/"
+    img_org_path = "saved_images/pred_vs_label/"
     if not os.path.exists(img_org_path):
         os.makedirs(img_org_path)
     # draw_images([depth_img, rgb_img, seg_img, target_obj], [target_obj_name, descriptions, reference_obj_name], idx, img_org_path )
     im = rgb_img.numpy()
 
     # Run model and show results
+
     outputs = predictor(im)
-    v = Visualizer(im[:, :, ::-1], metadata)
-    out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
-    out.get_image()[:, :, ::-1]
-    img_path = "saved_images/predicted_masks/"
-    texts = [target_obj_name, descriptions, reference_obj_name]
-    if not os.path.exists(img_path):
-        os.makedirs(img_path)
+    import pdb; pdb.set_trace()
+
+
+
+    # visualize predicted masks
+    # v = Visualizer(im[:, :, ::-1], metadata)
+    # out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+    # out.get_image()[:, :, ::-1]
+
+    # img_path = "saved_images/predicted_masks/"
+    # texts = [target_obj_name, descriptions, reference_obj_name]
+    # if not os.path.exists(img_path):
+    #     os.makedirs(img_path)
     # cv2.imwrite(img_path + '{}_{}.png'.format(idx, '_'.join(texts)), out.get_image()[:, :, ::-1])
 
-    pred_classe = [metadata.thing_classes[x] for x in outputs["instances"].pred_classes.cpu().tolist()]
+    # filter pred classes strings (water_jar -> water jar)
+    pred_classes_unfilterd = [metadata.thing_classes[x] for x in outputs["instances"].pred_classes.cpu().tolist()]
+    pred_class = []
+    for x in outputs["instances"].pred_classes.cpu().tolist():
+        parts = " ".join(metadata.thing_classes[x].split("_"))
+        parts = " ".join(parts.split("("))
+        parts = " ".join(parts.split(")"))
+        # Join the parts with spaces
+        pred_class.append(parts)
 
 
 
     # find the most similar word using fast text 
-    target_object_embedding = model_fast_text.get_word_vector(target_obj_name)
-    predictions_embedding = [model_fast_text.get_word_vector(pred) for pred in pred_classe]
-    similarity_fasttext_obj = pred_classe[np.argmax(cosine_similarity([target_object_embedding], predictions_embedding), axis=1)[0]]
+    similarity_fasttext_idx = synonim_using_fast_text(model_fast_text, target_obj_name, pred_class)
 
+    # find best synonim using birt cls 
+    synonim_object_cls_idx = synonim_using_birt(tokenizer, bert_model, target_obj_name, pred_class, True )
 
-
-    # birt similarity 
-    tokens = tokenizer.tokenize(tokenizer.cls_token + " " + target_obj_name + " " + tokenizer.sep_token)
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-    input_ids = torch.tensor(input_ids).unsqueeze(0)  # Add batch dimension
-
-    # Obtain embeddings
-    with torch.no_grad():
-        outputs = bert_model(input_ids)
-
-    # Extract the embedding of the [CLS] token
-    cls_embedding = outputs.last_hidden_state[:, 0, :]
-
-    # # Convert the tensor to a NumPy array
-    cls_embedding = cls_embedding.numpy()
+    # find best synonim using birt avrage embeding 
+    synonim_object_avg_idx = synonim_using_birt(tokenizer, bert_model, target_obj_name, pred_class )
     # import pdb; pdb.set_trace()
 
-    input_ids_list = []
-
-    for text in pred_classe:
-        tokens = tokenizer.tokenize(tokenizer.cls_token + " " + text + " " + tokenizer.sep_token)
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
-        input_ids_list.append(input_ids)
-
-
-    # Pad the input sequences to the same length (optional)
-    max_length = max(len(input_ids) for input_ids in input_ids_list)
-    input_ids_list = [input_ids + [tokenizer.pad_token_id] * (max_length - len(input_ids)) for input_ids in input_ids_list]
-
-    # Convert the input list to a PyTorch tensor
-    input_ids_tensor = torch.tensor(input_ids_list)
-
-    # Obtain embeddings
-    with torch.no_grad():
-        outputs = bert_model(input_ids_tensor)
-
-    # Extract the embeddings of the [CLS] tokens
-    cls_embeddings = outputs.last_hidden_state[:, 0, :].numpy()
-    synonim_object = pred_classe[np.argmax(cosine_similarity(cls_embedding, cls_embeddings), axis=1)[0]]
-    print("target : ", target_obj_name, " , synonim class birt : ", synonim_object, " , fast text synonim : ", similarity_fasttext_obj) 
-    print("all pred classes : ", pred_classe)
-    print("#####################################################################################")
+    fasttext_pred_mask = outputs["instances"].pred_masks[similarity_fasttext_idx].unsqueeze(2).cpu()
+    birt_cls_pred_mask = outputs["instances"].pred_masks[synonim_object_cls_idx].unsqueeze(2).cpu()
+    birt_avg_pred_mask = outputs["instances"].pred_masks[synonim_object_avg_idx].unsqueeze(2).cpu()
+    
+    fasttext_synonim = pred_class[similarity_fasttext_idx]
+    birt_cls_synonim = pred_class[synonim_object_cls_idx]
+    birt_avg_synonim = pred_class[synonim_object_avg_idx]
+    predicted_synonims = [fasttext_synonim, birt_cls_synonim, birt_avg_synonim, "RGB", "semantic_segmentation", target_obj_name]
     # import pdb; pdb.set_trace()
+
+    if target_obj.unsqueeze(2).sum ==0:
+        continue
+
+    idx+=1
+
+    fasttext_acc += mask_iou( fasttext_pred_mask, target_obj.unsqueeze(2))
+    birt_cls_acc += mask_iou( birt_cls_pred_mask, target_obj.unsqueeze(2))
+    birt_avg_acc += mask_iou( birt_avg_pred_mask, target_obj.unsqueeze(2))
+
+    if mask_iou( fasttext_pred_mask, target_obj.unsqueeze(2)) > 0.25 :
+        fasttext_num += 1 
+    if mask_iou( birt_cls_pred_mask, target_obj.unsqueeze(2)) > 0.25 :
+        birt_cls_num += 1
+    if mask_iou( birt_avg_pred_mask, target_obj.unsqueeze(2)) > 0.25 : 
+        birt_avg_num += 1 
+
+
+
+    # img_path = "saved_images/predicted_masks/"
+    # texts = [target_obj_name, descriptions, reference_obj_name]
+    # if not os.path.exists(img_path):
+    #     os.makedirs(img_path)
+    # draw_images([fasttext_pred_mask, birt_cls_pred_mask, birt_avg_pred_mask, rgb_img, seg_img, target_obj.unsqueeze(2)], [target_obj_name, descriptions, reference_obj_name,], idx, img_org_path, predicted_synonims )
+
+
+    # print("target : ", target_obj_name, " , synonim class birt cls : ", pred_class[similarity_fasttext_idx], ", synonim class birt avg : ", pred_class[synonim_object_cls_idx], " , fast text synonim : ", pred_class[synonim_object_avg_idx]) 
+    # print("all pred classes : ", pred_class)
+    # print("#####################################################################################")
 
 
     # if target_obj_name in [metadata.thing_classes[x] for x in outputs["instances"].pred_classes.cpu().tolist()]:
@@ -215,8 +239,13 @@ for batch in my_dataloader:
     # # print([metadata.thing_classes[x] for x in outputs["instances"].pred_classes.cpu().tolist()]) # class names
     # # print(outputs["instances"].scores)
     # # print(outputs["instances"].pred_boxes)
-    # if idx %10 ==0 :
-    #     print("accuracy = ", predicted/idx )
 
+    if idx %100 ==0 :
+        logging.info("####################################### %s #######################################", idx)
+        logging.info("mean_iou fasttext = %s", fasttext_acc/idx )
+        logging.info("mean_iou birt_cls = %s", birt_cls_acc/idx )
+        logging.info("mean_iou birt_avg = %s", birt_avg_acc/idx )
 
-
+        logging.info("accuracy fasttext = %s", fasttext_num/idx )
+        logging.info("accuracy birt_cls = %s", birt_cls_num/idx )
+        logging.info("accuracy birt_avg = %s", birt_avg_num/idx )

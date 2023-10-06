@@ -5,7 +5,9 @@ import ai2thor.controller
 import torch
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import numpy as np
 
+from sklearn.metrics.pairwise import cosine_similarity
 
 def read_ai2thour_data(data_root_path, data_id):
     """
@@ -83,20 +85,21 @@ def draw_bbx_on_image(image, y_min, x_min, width, height):
     plt.savefig('imgs/rW_{}.png'.format(width))
     plt.close()
 
-def draw_images(images, texts, idx, img_path):
-    # import pdb; pdb.set_tracce()
+def draw_images(images, texts, idx, img_path, predicted_synonims=None):
+    # import pdb; pdb.set_trace()
     height, width, channels = images[1].shape
 
 
     #draw on the image 
     fig, axs = plt.subplots(1, len(images), figsize=(width/100*3, height/100)) 
-    axs[0].text(-10, -10, ' '.join(texts) , fontsize=40, color='red')
+    fig.suptitle(' '.join(texts), fontsize=30)
 
 
     for i, image in enumerate(images):
         axs[i].imshow(image)
         axs[i].axis('off')
-        axs[i].set_title(f'Image {i + 1}')
+        if predicted_synonims:
+            axs[i].set_title(f'{predicted_synonims[i]}', fontsize=20)
     # plt.text(5, 5, ' '.join(texts) , fontsize=12, color='red')
     if img_path == None :
         img_path = '../saved_images/'
@@ -106,6 +109,11 @@ def draw_images(images, texts, idx, img_path):
     plt.savefig(img_path + '{}_{}.png'.format(idx, '_'.join(texts)))
     plt.close()
 
+def mask_iou( pred_mask, gt_mask):
+    overlap = pred_mask * gt_mask  # Logical AND
+    union = (pred_mask + gt_mask)>0  # Logical OR
+    iou = overlap.sum() / float(union.sum())
+    return iou
 
 def calculate_iou(boxs, box2):
     """
@@ -143,27 +151,85 @@ def calculate_iou(boxs, box2):
 
     return iou
 
-# import fasttext
-# from huggingface_hub import hf_hub_download
-# from sklearn.metrics.pairwise import cosine_similarity
 
 
-# def compute_similarity_fasttext(target_object,predictions):
+def synonim_using_birt(tokenizer, bert_model, target_obj_name, pred_classe , cls = False):
 
-#     # Load the pre-trained model
-#     model_path = hf_hub_download(repo_id="facebook/fasttext-be-vectors", filename="model.bin")
-#     model = fasttext.load_model(model_path)    
-#     target_object_embedding = model.get_word_vector(target_object)
-#     predictions_embedding = [model.get_word_vector(pred) for pred in predictions]
-#     import pdb; pdb.set_trace()
+    # birt similarity 
+    input_ids_list = []
+        
 
-#     similarity_score = cosine_similarity([target_object_embedding], predictions_embedding)
-#     return similarity_score
+    for text in pred_classe:
+        tokens = tokenizer.tokenize(tokenizer.cls_token + " " + text + " " + tokenizer.sep_token)
+        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+        input_ids_list.append(input_ids)
+
+    # Pad the input sequences to the same length (optional)
+    max_length = max(len(input_ids) for input_ids in input_ids_list)
+    input_ids_list_final = [input_ids + [tokenizer.pad_token_id] * (max_length - len(input_ids)) for input_ids in input_ids_list]
+    attention_masks = torch.tensor([[1]*len(input_ids)+ [tokenizer.pad_token_id] * (max_length - len(input_ids)) for input_ids in input_ids_list])
+
+    # Convert the input list to a PyTorch tensor
+    input_ids_list_final = torch.tensor(input_ids_list_final)
+
+    # Obtain embeddings
+    with torch.no_grad():
+        outputs = bert_model(input_ids_list_final, attention_masks)
+
+    if cls :
+
+        # Extract the embeddings of the [CLS] tokens
+        cls_embeddings = outputs.last_hidden_state[:, 0, :].numpy()
+
+    else :
+        # Extract all token embeddings
+        all_embeddings = outputs.last_hidden_state.numpy()
+
+        # Calculate the average embedding for each sentence
+        average_embeddings = np.mean(all_embeddings, axis=1)
 
 
-import openai
+    tokens_target = tokenizer.tokenize(tokenizer.cls_token + " " + target_obj_name + " " + tokenizer.sep_token)
+    input_ids_target = tokenizer.convert_tokens_to_ids(tokens_target)
+    input_ids_target = torch.tensor(input_ids_target).unsqueeze(0)  # Add batch dimension
+    input_ids_list_target = torch.tensor([input_ids_target[0].tolist() + [tokenizer.pad_token_id] * (max_length - len(input_ids_target[0].tolist())) ])
+    attention_mask =  torch.tensor([input_ids_target[0].shape[0] *[1] + [tokenizer.pad_token_id] * (max_length - input_ids_target[0].shape[0]) ])
+
+    # Obtain embeddings
+    with torch.no_grad():
+        outputs_target = bert_model(input_ids_list_target,attention_mask)
+
+    if cls :
+        # Extract the embedding of the [CLS] token
+        cls_embedding = outputs_target.last_hidden_state[:, 0, :].numpy()
+        # print(cosine_similarity(cls_embedding, cls_embeddings))
+        idx = np.argmax(cosine_similarity(cls_embedding, cls_embeddings), axis=1)[0]
+
+
+    else:
+
+        all_embedding = outputs_target.last_hidden_state.numpy()
+
+        # Calculate the average embedding for each sentence
+        average_embedding = np.mean(all_embedding, axis=1)
+        # print(cosine_similarity(average_embedding, average_embeddings))
+        idx = np.argmax(cosine_similarity(average_embedding, average_embeddings), axis=1)[0]
+
+    return idx ,cosine_similarity(average_embedding, average_embeddings)
+
+
+
+def synonim_using_fast_text(model_fast_text, target_obj_name, pred_class):
+
+    # find the most similar word using fast text 
+    target_object_embedding = model_fast_text.get_word_vector(target_obj_name)
+    predictions_embedding = [model_fast_text.get_word_vector(pred) for pred in pred_class]
+    idx = np.argmax(cosine_similarity([target_object_embedding], predictions_embedding), axis=1)[0]
+    return idx , cosine_similarity([target_object_embedding], predictions_embedding)
+
 
 def compute_similarity_gpt3_api():
+    import openai
     # Replace 'YOUR_API_KEY' with your actual API key
     api_key = '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'
 
