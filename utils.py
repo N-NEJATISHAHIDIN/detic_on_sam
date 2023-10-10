@@ -109,11 +109,26 @@ def draw_images(images, texts, idx, img_path, predicted_synonims=None):
     plt.savefig(img_path + '{}_{}.png'.format(idx, '_'.join(texts)))
     plt.close()
 
+def masks_iou_top_k( pred_masks, gt_mask, top_k = -1 ):
+    iou_list = []
+    for pred_mask in pred_masks[:top_k]:
+        overlap = pred_mask.unsqueeze(2) * gt_mask  # Logical AND
+        union = (pred_mask.unsqueeze(2) + gt_mask)>0  # Logical OR
+        iou = overlap.sum() / float(union.sum())
+        if iou == None:
+            iou = 0
+        iou_list.append(iou)
+    return np.max(np.array(iou_list)), np.argmax(np.array(iou_list))#, np.argmax(np.array(iou_list))
+
+
 def mask_iou( pred_mask, gt_mask):
     overlap = pred_mask * gt_mask  # Logical AND
     union = (pred_mask + gt_mask)>0  # Logical OR
     iou = overlap.sum() / float(union.sum())
+    if iou == None:
+        iou = 0
     return iou
+
 
 def calculate_iou(boxs, box2):
     """
@@ -204,18 +219,17 @@ def synonim_using_birt(tokenizer, bert_model, target_obj_name, pred_classe , cls
         cls_embedding = outputs_target.last_hidden_state[:, 0, :].numpy()
         # print(cosine_similarity(cls_embedding, cls_embeddings))
         idx = np.argmax(cosine_similarity(cls_embedding, cls_embeddings), axis=1)[0]
-
+        idx_sorted = np.argsort(cosine_similarity(cls_embedding, cls_embeddings), axis=1)[0]
 
     else:
-
         all_embedding = outputs_target.last_hidden_state.numpy()
-
         # Calculate the average embedding for each sentence
         average_embedding = np.mean(all_embedding, axis=1)
         # print(cosine_similarity(average_embedding, average_embeddings))
         idx = np.argmax(cosine_similarity(average_embedding, average_embeddings), axis=1)[0]
+        idx_sorted = np.argsort(cosine_similarity(average_embedding, average_embeddings), axis=1)[0]
 
-    return idx ,cosine_similarity(average_embedding, average_embeddings)
+    return idx , idx_sorted
 
 
 
@@ -225,7 +239,8 @@ def synonim_using_fast_text(model_fast_text, target_obj_name, pred_class):
     target_object_embedding = model_fast_text.get_word_vector(target_obj_name)
     predictions_embedding = [model_fast_text.get_word_vector(pred) for pred in pred_class]
     idx = np.argmax(cosine_similarity([target_object_embedding], predictions_embedding), axis=1)[0]
-    return idx , cosine_similarity([target_object_embedding], predictions_embedding)
+    idx_sorted = np.argsort(cosine_similarity([target_object_embedding], predictions_embedding), axis=1)[0]
+    return idx , idx_sorted
 
 
 def compute_similarity_gpt3_api():

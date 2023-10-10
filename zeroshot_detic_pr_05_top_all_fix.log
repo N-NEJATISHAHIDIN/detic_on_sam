@@ -1,0 +1,18 @@
+DEBUG:matplotlib:matplotlib data path: /home/negar/anaconda3/envs/detic/lib/python3.8/site-packages/matplotlib/mpl-data
+DEBUG:matplotlib:CONFIGDIR=/home/negar/.config/matplotlib
+DEBUG:matplotlib:interactive is False
+DEBUG:matplotlib:platform is linux
+DEBUG:matplotlib:CACHEDIR=/home/negar/.cache/matplotlib
+DEBUG:matplotlib.font_manager:Using fontManager instance from /home/negar/.cache/matplotlib/fontlist-v330.json
+INFO:iopath.common.file_io:URL https://dl.fbaipublicfiles.com/detic/Detic_LCOCOI21k_CLIP_SwinB_896b32_4x_ft4x_max-size.pth cached in /home/negar/.torch/iopath_cache/detic/Detic_LCOCOI21k_CLIP_SwinB_896b32_4x_ft4x_max-size.pth
+INFO:fvcore.common.checkpoint:[Checkpointer] Loading from /home/negar/.torch/iopath_cache/detic/Detic_LCOCOI21k_CLIP_SwinB_896b32_4x_ft4x_max-size.pth ...
+DEBUG:h5py._conv:Creating converter from 7 to 5
+DEBUG:h5py._conv:Creating converter from 5 to 7
+DEBUG:h5py._conv:Creating converter from 7 to 5
+DEBUG:h5py._conv:Creating converter from 5 to 7
+DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): huggingface.co:443
+DEBUG:urllib3.connectionpool:https://huggingface.co:443 "HEAD /facebook/fasttext-be-vectors/resolve/main/model.bin HTTP/1.1" 302 0
+DEBUG:urllib3.connectionpool:https://huggingface.co:443 "HEAD /bert-base-uncased/resolve/main/tokenizer_config.json HTTP/1.1" 200 0
+DEBUG:urllib3.connectionpool:https://huggingface.co:443 "HEAD /bert-base-uncased/resolve/main/config.json HTTP/1.1" 200 0
+DEBUG:urllib3.connectionpool:https://huggingface.co:443 "HEAD /bert-base-uncased/resolve/main/config.json HTTP/1.1" 200 0
+DEBUG:h5py._conv:Creating converter from 3 to 5
